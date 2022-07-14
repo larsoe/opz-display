@@ -1,16 +1,21 @@
-#include <Arduino.h>
-#include <U8g2lib.h>
+/* 
+OP-Z screen
+Raspberry Pico connected to SSD1306 0.96" monochrome screen
+GND - GND
+VDD - 3.3V
+SCK - GP5
+SDA - GP4
+Raspberry Pico must be configured to accept arduino code with this guide: https://learn.adafruit.com/rp2040-arduino-with-the-earlephilhower-core/overview
 
-#ifdef U8X8_HAVE_HW_SPI
+Original code by https://github.com/apiel/opz-display
+Modified to work with 0.96" OLED screen by larsoe
+
+*/
+
 #include <SPI.h>
-#endif
-#ifdef U8X8_HAVE_HW_I2C
 #include <Wire.h>
-#endif
-
-U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // EastRising 0.42" OLED
-
-#include <Arduino.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <Adafruit_TinyUSB.h>
 #include <MIDI.h>
 
@@ -22,57 +27,73 @@ MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, MIDI);
 #define RENDER_SIZE 100
 char render[3][RENDER_SIZE] = {"", "", ""};
 
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+// Wire
+#define PIN_WIRE_SDA        (6u)
+#define PIN_WIRE_SCL        (7u)
+
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3C 
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+//---------Draw funksjon, skift ut u8g2-------------------------------------
 unsigned long lastDraw = 0;
 void draw()
 {
   if (millis() - lastDraw > 100)
   {
     lastDraw = millis();
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14_tf);
-    u8g2.setFontRefHeightExtendedText();
-    u8g2.setDrawColor(1);
-    u8g2.setFontPosTop();
-    u8g2.setFontDirection(0);
-    u8g2.drawStr(0, 0, render[0]);
-    u8g2.drawStr(0, 14, render[1]);
-    u8g2.drawStr(0, 28, render[2]);
-    u8g2.sendBuffer();
+    display.clearDisplay();
+    display.setTextSize(2);             // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE);        // Draw white text
+    display.setCursor(10, 10);
+    display.println(render[0]);
+    display.setTextSize(1);
+    display.setCursor(10, 30);
+    display.println(render[1]);
+    display.setCursor(10, 50);
+    display.println(render[2]);
+    display.display();
   }
 }
+//-----------------------------------------------------------------------
 
-void setup(void)
-{
-  Wire.setSDA(22);
-  Wire.setSCL(23);
-  Wire.begin();
-  u8g2.begin();
+void setup() {
+  #if defined(ARDUINO_ARCH_MBED) && defined(ARDUINO_ARCH_RP2040)
+    // Manual begin() is required on core without built-in support for TinyUSB such as mbed rp2040
+    TinyUSB_Device_Init(0);
+  #endif
 
-  strcpy(render[0], "OP-Z screen");
-  strcpy(render[1], "v0.0.1");
+    pinMode(LED_BUILTIN, OUTPUT);
 
-#if defined(ARDUINO_ARCH_MBED) && defined(ARDUINO_ARCH_RP2040)
-  // Manual begin() is required on core without built-in support for TinyUSB such as mbed rp2040
-  TinyUSB_Device_Init(0);
-#endif
+    MIDI.begin(MIDI_CHANNEL_OMNI);
 
-  pinMode(LED_BUILTIN, OUTPUT);
+    MIDI.setHandleControlChange(handleControlChange);
 
-  MIDI.begin(MIDI_CHANNEL_OMNI);
-
-  MIDI.setHandleControlChange(handleControlChange);
-
+  
   Serial.begin(115200);
 
-  // wait until device mounted
-  while (!TinyUSBDevice.mounted())
-    delay(1);
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;); // Don't proceed, loop forever
+  }
+  // Clear the buffer
+  display.clearDisplay();
+  display.setTextSize(1);             // Normal 1:1 pixel scale
+  display.setTextColor(SSD1306_WHITE);        // Draw white text
+  display.setCursor(40, 30);
+  display.println("Booting!");
+  display.display();
+  delay(2000);
 }
 
-void loop(void)
-{
-  MIDI.read();
-  draw();
+void loop() {
+    MIDI.read();
+    draw();
+  
 }
 
 void handleControlChange(byte channel, byte cc, byte value)
